@@ -77,11 +77,11 @@ class Decoder(nn.Module):
         self.blocks = nn.ModuleList([
             nn.Linear(hidden_size, hidden_size) for i in range(n_blocks - 1)
         ])
-        n_skips = sum([i in skips for i in range(n_blocks - 1)])
-        if n_skips > 0:
+        n_skips = sum([i in skips for i in range(n_blocks - 1)]) # skips : skip connection의 위치
+        if n_skips > 0: # skip connection이 존재 
             self.fc_z_skips = nn.ModuleList(
                 [nn.Linear(z_dim, hidden_size) for i in range(n_skips)]
-            )
+            ) #
             self.fc_p_skips = nn.ModuleList([
                 nn.Linear(dim_embed, hidden_size) for i in range(n_skips)
             ])
@@ -118,39 +118,44 @@ class Decoder(nn.Module):
         return p_transformed
 
     def forward(self, p_in, ray_d, z_shape=None, z_app=None, **kwargs):
-        a = F.relu
-        if self.z_dim > 0:
-            batch_size = p_in.shape[0]
-            if z_shape is None:
+        a = F.relu # activation
+        if self.z_dim > 0: # latent code 삽입
+            batch_size = p_in.shape[0] # 3D points 
+            if z_shape is None: # latent code for shape
                 z_shape = torch.randn(batch_size, self.z_dim).to(p_in.device)
-            if z_app is None:
+            if z_app is None: # latent code for appearance
                 z_app = torch.randn(batch_size, self.z_dim).to(p_in.device)
-        p = self.transform_points(p_in)
-        net = self.fc_in(p)
+        p = self.transform_points(p_in) # positional encoding
+        net = self.fc_in(p) # N x x x dim_embed > N x x x hidden
         if z_shape is not None:
-            net = net + self.fc_z(z_shape).unsqueeze(1)
-        net = a(net)
+            net = net + self.fc_z(z_shape).unsqueeze(1) # shape latent code를 추가
+        net = a(net) # activation
 
         skip_idx = 0
         for idx, layer in enumerate(self.blocks):
-            net = a(layer(net))
+            net = a(layer(net)) # linear > activation
             if (idx + 1) in self.skips and (idx < len(self.blocks) - 1):
+                # skip connection을 한다면?
+                # 최초 입력에서 바로 이어지는 bypass layer를 통해 skip connection
                 net = net + self.fc_z_skips[skip_idx](z_shape).unsqueeze(1)
                 net = net + self.fc_p_skips[skip_idx](p)
                 skip_idx += 1
+         
+        # hidden to 1
         sigma_out = self.sigma_out(net).squeeze(-1)
-
+        
+        # hidden to hidden
         net = self.feat_view(net)
-        net = net + self.fc_z_view(z_app).unsqueeze(1)
+        net = net + self.fc_z_view(z_app).unsqueeze(1) # appearance latent code 추가
         if self.use_viewdirs and ray_d is not None:
-            ray_d = ray_d / torch.norm(ray_d, dim=-1, keepdim=True)
-            ray_d = self.transform_points(ray_d, views=True)
-            net = net + self.fc_view(ray_d)
-            net = a(net)
+            ray_d = ray_d / torch.norm(ray_d, dim=-1, keepdim=True) # normalize
+            ray_d = self.transform_points(ray_d, views=True) # positional encode for ray
+            net = net + self.fc_view(ray_d) # embed_dim to hidden
+            net = a(net) # activation
             if self.n_blocks_view > 1:
                 for layer in self.blocks_view:
-                    net = a(layer(net))
-        feat_out = self.feat_out(net)
+                    net = a(layer(net)) # 3이상은 불가능
+        feat_out = self.feat_out(net) # hidden to rgb_out_dim (M_f)
 
         if self.final_sigmoid_activation:
             feat_out = torch.sigmoid(feat_out)
