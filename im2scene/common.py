@@ -22,30 +22,30 @@ def arange_pixels(resolution=(128, 128), batch_size=1, image_range=(-1., 1.),
     n_points = resolution[0] * resolution[1]
 
     # Arrange pixel location in scale resolution
-    pixel_locations = torch.meshgrid(torch.arange(0, w), torch.arange(0, h))
+    pixel_locations = torch.meshgrid(torch.arange(0, w), torch.arange(0, h)) # 말 그대로 pixel의 좌표값. 0, 0 ~ w-1, h-1까지 생성 각 좌표에 맞는 값이 들어감
     pixel_locations = torch.stack(
         [pixel_locations[0], pixel_locations[1]],
-        dim=-1).long().view(1, -1, 2).repeat(batch_size, 1, 1)
-    pixel_scaled = pixel_locations.clone().float()
+        dim=-1).long().view(1, -1, 2).repeat(batch_size, 1, 1) # w x h x 2 (stack) > 1 x wh x 2 (view) > batch_size x wh x 2 (repeat)
+    pixel_scaled = pixel_locations.clone().float() # 원본 복사
 
     # Shift and scale points to match image_range
     scale = (image_range[1] - image_range[0])
     loc = scale / 2
-    pixel_scaled[:, :, 0] = scale * pixel_scaled[:, :, 0] / (w - 1) - loc
-    pixel_scaled[:, :, 1] = scale * pixel_scaled[:, :, 1] / (h - 1) - loc
+    pixel_scaled[:, :, 0] = scale * pixel_scaled[:, :, 0] / (w - 1) - loc # image_range가 -1, 1 이 default > scale = 2, loc = 1
+    pixel_scaled[:, :, 1] = scale * pixel_scaled[:, :, 1] / (h - 1) - loc # 각 좌표를 minmax scaling 후 scale, zero center로 변경 > 각 좌표가 zero mean, scale-std
 
     # Subsample points if subsample_to is not None and > 0
-    if (subsample_to is not None and subsample_to > 0 and
+    if (subsample_to is not None and subsample_to > 0 and # None으로 주어짐. 
             subsample_to < n_points):
         idx = np.random.choice(pixel_scaled.shape[1], size=(subsample_to,),
-                               replace=False)
+                               replace=False) # 임의의 한 pixel과 location 을 고름
         pixel_scaled = pixel_scaled[:, idx]
         pixel_locations = pixel_locations[:, idx]
 
     if invert_y_axis:
         assert(image_range == (-1, 1))
         pixel_scaled[..., -1] *= -1.
-        pixel_locations[..., -1] = (h - 1) - pixel_locations[..., -1]
+        pixel_locations[..., -1] = (h - 1) - pixel_locations[..., -1] 
 
     return pixel_locations, pixel_scaled
 
