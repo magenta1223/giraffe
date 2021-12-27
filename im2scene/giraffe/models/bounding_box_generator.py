@@ -122,33 +122,50 @@ class BoundingBoxGenerator(nn.Module):
             s_rand = torch.rand(batch_size, n_boxes, 1)
         else:
             s_rand = torch.rand(batch_size, n_boxes, 3)
-        s = self.scale_min + s_rand * self.scale_range
+        s = self.scale_min + s_rand * self.scale_range # s_rand의 axis 2에 곱해줌. fix_scale_ratio의 경우 모두 scale이 동일
 
         # Sample translations
         if self.prior is not None:
             idx = np.random.randint(self.prior.shape[0], size=(batch_size))
             t = self.prior[idx]
-        else:
+        else: # default
             t = self.translation_min + \
                 torch.rand(batch_size, n_boxes, 3) * self.translation_range
-            if self.check_collison:
-                is_free = self.check_for_collison(s, t)
+            if self.check_collison: # default False
+                is_free = self.check_for_collison(s, t) # 값이 True가 될 때 까지 반복
                 while not torch.all(is_free):
                     t_new = self.translation_min + \
                         torch.rand(batch_size, n_boxes, 3) * \
                         self.translation_range
                     t[is_free == 0] = t_new[is_free == 0]
-                    is_free = self.check_for_collison(s, t)
+                    is_free = self.check_for_collison(s, t) # 
             if self.object_on_plane:
-                t[..., -1] = self.z_level_plane
+                t[..., -1] = self.z_level_plane # plane background
 
         def r_val(): return self.rotation_range[0] + np.random.rand() * (
-            self.rotation_range[1] - self.rotation_range[0])
+            self.rotation_range[1] - self.rotation_range[0]) # np.random.rand() : 0 ~ 1 uniform distribution. rotation_min + (rotation_max - rotation_min) * (0~1) : 범위 내의 적당한 값을 랜덤으로 
         R = [torch.from_numpy(
-            Rot.from_euler('z', r_val() * 2 * np.pi).as_dcm())
-            for i in range(batch_size * self.n_boxes)]
+            Rot.from_euler('z', r_val() * 2 * np.pi).as_dcm()) 
+            for i in range(batch_size * self.n_boxes)] # 
+        # Rot : 3차원 회전을 위한 scipy class
+        # Rot.from_euler: initialization from Euler Angles
+        # 3D rotation == 각 축에 대해 rotation을 3번한 것
+        # 이론적으로는 3D 유클리드 공간을 생성하는 임의의 3개의 axes(basis?)면 충분
+        # 실제로는, rotation의 축은 기저벡터를 사용
+        # 3개의 rotation은 global frame of reference (extrinsic)에서도
+        # a body centered frame of reference (intrinsic)에서도 가능하다고 한다
+        # 어떤 객체 밖에서 객체를 돌리든, 해당 객체를 돌리든 
+        # 사실 기준점의 차이 빼곤 없지 않나.. ? 
+        
+        # args : seq and angle
+        # seq : string. intrinsic rotation 을 하려면 X, Y, Z 중에 고르고, extrinsic을 하려면 x, y, z를 고르면 된다.
+        # z를 선택했으니 높이에 대해서 extrinsic rotation
+        # angle : r_val() * 2 * np.pi : angle by radian
+        # as_dcm : 3x3 real orthogonal matrix with determinant 1로 변환
+        
+        # 즉 R은 현재 mini-batch의 모든 객체에 대한 3차원 회전행렬
         R = torch.stack(R, dim=0).reshape(
-            batch_size, self.n_boxes, -1).cuda().float()
+            batch_size, self.n_boxes, -1).cuda().float() # batch_size * n_boxes x 3 x 3 > batch_size, self.n_boxes, 9
         return s, t, R
 
     def forward(self, batch_size=32):
